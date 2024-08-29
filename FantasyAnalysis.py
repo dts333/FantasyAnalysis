@@ -64,6 +64,12 @@ proj24 = pd.merge(
 proj24 = proj24.groupby('position').apply(select_top_n)
 proj24 = proj24.reset_index(drop=True)
 proj24["pos_med"] = proj24.position.apply(lambda x: proj24.loc[proj24.position == x, "pts_half_ppr"].median())
-proj24["var"] = proj24.pts_half_ppr - proj24["pos_med"]
+proj24["pos_min"] = proj24.position.apply(lambda x: proj24.loc[proj24.position == x, "pts_half_ppr"].min())
+proj24["var"] = proj24.pts_half_ppr - proj24["pos_min"]
+proj24["pred_variance"] = proj24.pts_half_ppr.var()
+proj24["prev_mean_error"] = proj24.position.apply(lambda x: data.groupby("position").difference.mean()[x])
+proj24["prev_var_error"] = proj24.position.apply(lambda x: data.groupby("position").difference.var()[x])
+proj24["prev_mean_actual"] = proj24.position.apply(lambda x: data.groupby("position").pts_half_ppr_y.mean()[x])
+proj24["lambda"] = proj24.prev_var_error / (proj24.prev_var_error + proj24.pred_variance)
+proj24["adjusted_pts"] = proj24["lambda"] * proj24.pts_half_ppr + (1 - proj24["lambda"]) * proj24.prev_mean_actual
 proj24.to_csv("sleeper_projections_24.csv")
-# %%
