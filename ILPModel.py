@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import pulp
 
-from FantasyAnalysis import select_top_n, COLS
+from FantasyAnalysis import process_projections, select_top_n, COLS
 
 #%% Initialize the model
 model = pulp.LpProblem("Fantasy_Football_Draft", pulp.LpMaximize)
@@ -11,7 +11,7 @@ model = pulp.LpProblem("Fantasy_Football_Draft", pulp.LpMaximize)
 #%% Define the positions and their requirements
 positions = {
     'QB': 1,
-    'RB': 2,
+    'RB': 3,
     'WR': 3,
     'TE': 1,
     'DEF': 1,
@@ -45,16 +45,36 @@ data = data.dropna(subset=["pts_half_ppr_x", "Cost"])
 data = data.drop(data.loc[(data.key == "B. Robinson") & (data.Cost == 4)].index[0])
 players = json.loads(data.to_json(orient="records"))
 
+#%% 2024 draft
+proj = pd.read_json(f"Data/sleeper_projections_2024.json")
+proj2 = pd.json_normalize(proj.stats)
+proj3 = pd.json_normalize(proj.player)
+proj = pd.merge(
+    proj.drop(["stats", "player"], axis=1), 
+    pd.merge(
+        proj2, proj3, left_index=True, right_index=True
+        ), left_index=True, right_index=True
+    )[COLS]
+
+proj = proj.groupby('position').apply(select_top_n)
+proj = proj.reset_index(drop=True)
+draft = pd.read_csv("Data/draft2024.csv")
+data["key"] = data.apply(lambda x: x.first_name[0] + ". " + x.last_name, axis=1)
+data = pd.merge(data, draft, left_on="key", right_on="Name", how="left")
+data = data.dropna(subset=["pts_half_ppr_x", "Cost"])
+data = data.drop(data.loc[(data.key == "B. Robinson") & (data.Cost == 4)].index[0])
+players = json.loads(data.to_json(orient="records"))
+
 #%% Create variables
 x = pulp.LpVariable.dicts("select", 
                           ((player['key'], player['position']) for player in players), 
                           cat='Binary')
 
 #%% Objective function
-model += pulp.lpSum(player['pts_half_ppr_x'] * x[player['key'], player['position']] for player in players)
+model += pulp.lpSum(player['adjusted_pts'] * x[player['key'], player['position']] for player in players)
 
 #%% Budget constraint
-model += pulp.lpSum(player['Cost'] * x[player['key'], player['position']] for player in players) <= 200
+model += pulp.lpSum(player['Cost'] * x[player['key'], player['position']] for player in players) <= 185
 
 #%% Position constraints
 for position, count in positions.items():

@@ -59,14 +59,14 @@ def process_data(data):
     data["mean_actual"] = data.position.apply(lambda x: data.groupby("position").pts_half_ppr_y.mean()[x])
     data["lambda"] = data.var_error / (data.var_error + data.pred_variance)
     data["adjusted_pts"] = data["lambda"] * data.pts_half_ppr_x + (1 - data["lambda"]) * data.pred_mean
-    data.to_csv("FantasyAnalysis.csv")
+    #data.to_csv("FantasyAnalysis.csv")
 
     return data
 
 
 
 # %%
-def process_projections():
+def process_projections(data):
     proj24 = pd.read_json("Data/sleeper_projections_2024.json")
     proj24 = pd.merge(
         proj24.drop(["stats", "player"], axis=1),
@@ -84,7 +84,7 @@ def process_projections():
     proj24["pos_med"] = proj24.position.apply(lambda x: proj24.loc[proj24.position == x, "pts_half_ppr"].median())
     proj24["pos_min"] = proj24.position.apply(lambda x: proj24.loc[proj24.position == x, "pts_half_ppr"].min())
     proj24["var"] = proj24.pts_half_ppr - proj24["pos_min"]
-    proj24["pred_variance"] = proj24.position.apply(lambda x: data.groupby("position").pts_half_ppr.var()[x])
+    proj24["pred_variance"] = proj24.position.apply(lambda x: proj24.groupby("position").pts_half_ppr.var()[x])
     proj24["prev_mean_error"] = proj24.position.apply(lambda x: data.groupby("position").difference.mean()[x])
     proj24["prev_var_error"] = proj24.position.apply(lambda x: data.groupby("position").difference.var()[x])
     proj24["prev_mean_actual"] = proj24.position.apply(lambda x: data.groupby("position").pts_half_ppr_y.mean()[x])
