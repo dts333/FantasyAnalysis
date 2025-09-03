@@ -4,7 +4,7 @@ import pandas as pd
 #%%
 PROJ_URL = "https://api.sleeper.com/projections/nfl/{}?season_type=regular&position%5B%5D=DEF&position%5B%5D=K&position%5B%5D=QB&position%5B%5D=RB&position%5B%5D=TE&position%5B%5D=WR&order_by=pts_half_ppr"
 STATS_URL = "https://api.sleeper.com/stats/nfl/{}?season_type=regular&position%5B%5D=DEF&position%5B%5D=K&position%5B%5D=QB&position%5B%5D=RB&position%5B%5D=TE&position%5B%5D=WR&order_by=pts_half_ppr"
-YEARS = [2022, 2023]
+YEARS = [2021, 2022, 2023, 2024]
 COLS = ["position", "pts_half_ppr", "player_id", "season", "category", "years_exp", "adp_half_ppr", "first_name", "last_name"]
 POSITIONS = {
     "QB": 12,
@@ -24,7 +24,7 @@ def select_top_n(group):
 def load_data():
     data = pd.DataFrame()
     for y in YEARS:
-        proj = pd.read_json(f"Data/sleeper_projections_{y}.json")
+        proj = pd.read_csv(f"Data/sleeper_projections_{y}.json")
         proj2 = pd.json_normalize(proj.stats)
         proj3 = pd.json_normalize(proj.player)
         proj = pd.merge(
@@ -43,6 +43,31 @@ def load_data():
         stats = pd.merge(stats.drop(["stats", "player"], axis=1), pd.merge(stats2, stats3, left_index=True, right_index=True), left_index=True, right_index=True)[["player_id", "pts_half_ppr"]]
         df = pd.merge(proj, stats, on="player_id", how="left")
     data = pd.concat([data, df])
+
+    return data
+
+#%%
+def select_top_n2(group):
+    position = group.name
+    n = POSITIONS.get(position, 12)  # Default to 12 if position not in dict
+    return group.nlargest(n, 'points')
+
+#%%
+def load_new_data():
+    data = pd.DataFrame()
+    for y in YEARS:
+        proj = pd.read_csv(f"Data/{y}_players_projection.csv")
+        stats = pd.read_csv(f"Data/{y}_players_stats.csv")
+        df = pd.merge(
+            proj[["name", "position", "team", "bye_week", "points"]], 
+            stats[["name", "points"]], left_on='name', right_on='name', suffixes=('', '_actual')
+            )
+        for col in ['points', 'points_actual']:
+            df[col] = df[col].replace('-', 0).astype(float)
+
+        df = df.groupby('position').apply(select_top_n2)
+        df['year'] = y
+        data = pd.concat([data, df]).reset_index(drop=True)
 
     return data
 
@@ -94,4 +119,41 @@ def process_projections(data):
 
     return proj24
 
+#%%
+def process_data_2(data):
+    data["difference"] = data.points_actual - data.points
+    data["pos_med"] = data.position.apply(lambda x: data.loc[data.position == x, "points"].median())
+    data["pos_min"] = data.position.apply(lambda x: data.loc[data.position == x, "points"].min())
+    data["var"] = data.points - data["pos_min"]
+    data["pred_mean"] = data.position.apply(lambda x: data.groupby("position").points.mean()[x])
+    data["pred_variance"] = data.position.apply(lambda x: data.groupby("position").points.var()[x])
+    data["mean_error"] = data.position.apply(lambda x: data.groupby("position").difference.mean()[x])
+    data["var_error"] = data.position.apply(lambda x: data.groupby("position").difference.var()[x])
+    data["mean_actual"] = data.position.apply(lambda x: data.groupby("position").points_actual.mean()[x])
+    data["lambda"] = data.var_error / (data.var_error + data.pred_variance)
+    data["adjusted_pts"] = data["lambda"] * data.points + (1 - data["lambda"]) * data.pred_mean
+
+
+    return data
+
 # %%
+if __name__ == "__main__":
+    data = load_new_data()
+    data = process_data_2(data)
+
+    proj = pd.read_csv("Data/2025_players_projection.csv")
+    proj['points'] = proj['points'].replace('-', 0).astype(float)
+    proj = proj.groupby('position').apply(select_top_n2)
+    proj = proj.reset_index(drop=True)
+    proj["pos_med"] = proj.position.apply(lambda x: proj.loc[proj.position == x, "points"].median())
+    proj["pos_min"] = proj.position.apply(lambda x: proj.loc[proj.position == x, "points"].min())
+    proj["var"] = proj.points - proj["pos_min"]
+    proj["pred_variance"] = proj.position.apply(lambda x: proj.groupby("position").points.var()[x])
+    proj["prev_mean_error"] = proj.position.apply(lambda x: data.groupby("position").difference.mean()[x])
+    proj["prev_var_error"] = proj.position.apply(lambda x: data.groupby("position").difference.var()[x])
+    proj["prev_mean_actual"] = proj.position.apply(lambda x: data.groupby("position").points_actual.mean()[x])
+    proj["lambda"] = proj.prev_var_error / (proj.prev_var_error + proj.pred_variance)
+    proj["adjusted_pts"] = proj["lambda"] * proj.points + (1 - proj["lambda"]) * proj.prev_mean_actual
+    proj.to_csv("sleeper_projections_25.csv")
+
+    data.to_csv("FantasyAnalysis2025.csv")
